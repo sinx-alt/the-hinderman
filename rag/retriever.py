@@ -14,6 +14,7 @@ _DOCUMENTS = Path(__file__).with_name("seed") / "documents.json"
 _STOPWORDS = {
     "a", "an", "and", "are", "as", "for", "how", "i", "in", "is", "it", "me",
     "of", "on", "or", "the", "to", "was", "what", "who", "with",
+    "restricted",
 }
 
 

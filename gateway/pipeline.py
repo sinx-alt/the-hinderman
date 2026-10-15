@@ -94,7 +94,7 @@ async def process_chat(
     if request.use_rag:
         retrieval = await asyncio.to_thread(retrieve, request.prompt, user)
         context = [f"{chunk['title']}: {chunk['text']}" for chunk in retrieval["chunks"]]
-        if retrieval["denied_count"]:
+        if retrieval["denied_count"] and not retrieval["chunks"]:
             inbound_findings.append(
                 Finding(category="RESTRICTED_DOC", type="RESTRICTED_DOC", start=None, end=None,
                         confidence=1.0, detector="rag_acl")
@@ -119,6 +119,7 @@ async def process_chat(
             request_id=request_id,
             gateway_report={"policy_ids": decision.policy_ids, "audit_id": event.id,
                             "denied_document_count": retrieval["denied_count"],
+                            "denied_doc_ids": retrieval["denied_doc_ids"],
                             "image_text_scanned": bool(image_text)},
         )
     if decision.action == "require_approval":

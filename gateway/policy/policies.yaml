@@ -1,7 +1,7 @@
 policies:
   - id: CRED-001
     when: {category: CREDENTIAL}
-    action: block
+    action: mask
   - id: INJ-001
     when: {category: INJECTION, min_confidence: 0.8}
     action: block

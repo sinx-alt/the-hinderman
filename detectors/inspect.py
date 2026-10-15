@@ -13,8 +13,9 @@ _SECRET_PATTERNS = [
     ("PRIVATE_KEY", re.compile(r"-----BEGIN (?:RSA |EC |OPENSSH )?PRIVATE KEY-----"), 1.0),
 ]
 _PASSWORD = re.compile(
-    r"(?i)\b(?:password|passwd|pwd|secret)\s*[:=]\s*['\"]?([^\s'\";,]{6,})"
+    r"(?i)\b(?:password|passwd|pwd|secret)\s*(?:(?:is|:|=)\s*)['\"]?([^\s'\";,]{6,})"
 )
+_API_KEY = re.compile(r"(?i)\bsk-[A-Za-z0-9_-]{10,}\b")
 _CONFIDENTIAL = re.compile(
     r"(?i)\b(?:confidential|strictly confidential|internal only|do not distribute)\b"
 )
@@ -33,6 +34,12 @@ def inspect(text: str, direction: str = "prompt", ctx: UserContext | None = None
         Finding(category="CREDENTIAL", type="PASSWORD", start=match.start(1), end=match.end(1),
                 confidence=0.92, detector="password_context")
         for match in _PASSWORD.finditer(text)
+    )
+    findings.extend(
+        Finding(category="CREDENTIAL", type="API_KEY", start=match.start(), end=match.end(),
+                confidence=0.95, detector="secret_regex")
+        for match in _API_KEY.finditer(text)
+        if not any(item.start == match.start() and item.end == match.end() for item in findings)
     )
     findings.extend(
         Finding(category="CONFIDENTIAL", type="CONFIDENTIAL_MARKER", start=match.start(),

@@ -22,5 +22,6 @@
   {"id":"legal-policy-001","title":"Contract review workflow","department":"legal","min_clearance":2,"roles":["admin"],"text":"Legal reviews vendor contract changes before signature. Store executed agreements in the approved repository."},
   {"id":"legal-contract-002","title":"Confidential procurement terms","department":"legal","min_clearance":2,"roles":["admin"],"text":"CONFIDENTIAL LEGAL MEMO. Procurement discounts and negotiation positions are privileged business information."},
   {"id":"product-brief-001","title":"Public product overview","department":"public","min_clearance":0,"roles":["intern","hr_officer","finance_manager","admin"],"text":"The product helps teams organize work, collaborate on projects, and share approved updates."},
-  {"id":"it-guide-001","title":"IT help desk","department":"public","min_clearance":0,"roles":["intern","hr_officer","finance_manager","admin"],"text":"For device support, open a help desk ticket and include the device asset tag, issue summary, and contact hours."}
+  {"id":"it-guide-001","title":"IT help desk","department":"public","min_clearance":0,"roles":["intern","hr_officer","finance_manager","admin"],"text":"For device support, open a help desk ticket and include the device asset tag, issue summary, and contact hours."},
+  {"id":"board-minutes-001","title":"Restricted board minutes","department":"board","min_clearance":3,"roles":["admin"],"text":"RESTRICTED BOARD MINUTES. This confidential record is limited to explicitly approved board administrators."}
 ]
