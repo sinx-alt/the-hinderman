@@ -399,3 +399,13 @@ FodyWeavers.xsd
 
 # JetBrains Rider
 *.sln.iml
+# The Hinderman local state and credentials
+.env
+.venv/
+data/
+*.sqlite3
+dashboard/node_modules/
+dashboard/dist/
+__pycache__/
+*.py[cod]
+*.tsbuildinfo

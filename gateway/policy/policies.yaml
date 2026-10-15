@@ -1,0 +1,31 @@
+policies:
+  - id: CRED-001
+    when: {category: CREDENTIAL}
+    action: block
+  - id: INJ-001
+    when: {category: INJECTION, min_confidence: 0.8}
+    action: block
+  - id: INJ-002
+    when: {category: INJECTION, min_confidence: 0.5}
+    action: require_approval
+  - id: IMG-001
+    when: {category: INJECTION, source: image}
+    action: block
+  - id: RAG-001
+    when: {category: RESTRICTED_DOC}
+    action: block
+  - id: RESP-001
+    when: {direction: response, category: PII}
+    action: redact
+  - id: PII-001
+    when: {category: PII, type: [AADHAAR, PAN, PHONE, EMAIL]}
+    action: mask
+  - id: FIN-001
+    when: {category: FINANCIAL}
+    action: mask
+  - id: CONF-001
+    when: {category: CONFIDENTIAL}
+    action: warn
+  - id: INJ-003
+    when: {category: INJECTION}
+    action: warn

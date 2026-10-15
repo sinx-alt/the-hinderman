@@ -1,0 +1,35 @@
+services:
+  gateway:
+    build: .
+    environment:
+      LLM_MODE: ${LLM_MODE:-ollama}
+      LLM_MODEL: ${LLM_MODEL:-ollama/qwen3.5:4b}
+      LLM_TIMEOUT_SECONDS: ${LLM_TIMEOUT_SECONDS:-180}
+      LLM_MAX_TOKENS: ${LLM_MAX_TOKENS:-256}
+      OLLAMA_THINK: ${OLLAMA_THINK:-false}
+      OLLAMA_API_BASE: ${OLLAMA_API_BASE:-http://host.docker.internal:11434}
+      OCR_MODE: ${OCR_MODE:-tesseract}
+      JWT_SECRET: ${JWT_SECRET:-hinderman-local-demo-secret-change-before-network}
+      AUDIT_DB: /data/audit.sqlite3
+      POLICY_FILE: /app/gateway/policy/policies.yaml
+    ports:
+      - "8000:8000"
+    volumes:
+      - gateway-data:/data
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8000/health')"]
+      interval: 15s
+      timeout: 3s
+      retries: 5
+  dashboard:
+    build: ./dashboard
+    ports:
+      - "3000:80"
+    depends_on:
+      gateway:
+        condition: service_healthy
+
+volumes:
+  gateway-data:
