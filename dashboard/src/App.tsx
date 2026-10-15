@@ -1,6 +1,6 @@
 import { ChangeEvent, FormEvent, useCallback, useEffect, useMemo, useState } from "react";
 import {
-  Area, AreaChart, CartesianGrid, ResponsiveContainer, Tooltip, XAxis, YAxis,
+  Bar, BarChart, CartesianGrid, Cell, Pie, PieChart, ResponsiveContainer, Tooltip, XAxis, YAxis,
 } from "recharts";
 import "./image-input.css";
 
@@ -65,23 +65,26 @@ export default function App() {
   const [trends, setTrends] = useState<{ date: string; incidents: number; blocked: number }[]>([]);
   const [policies, setPolicies] = useState<Policy[]>([]);
   const [approvals, setApprovals] = useState<Approval[]>([]);
+  const [auditValid, setAuditValid] = useState<boolean | null>(null);
   const [policyText, setPolicyText] = useState("");
   const [notice, setNotice] = useState("");
 
   const refresh = useCallback(async () => {
     if (!token) return;
     try {
-      const [eventData, metricData, trendData, policyData] = await Promise.all([
+      const [eventData, metricData, trendData, policyData, auditData] = await Promise.all([
         request<{ incidents: Event[] }>("/api/incidents?limit=100", token),
         request<Record<string, unknown>>("/api/metrics/summary", token),
         request<{ trends: typeof trends }>("/api/metrics/trends", token),
         request<{ policies: Policy[] }>("/api/policies", token),
+        request<{ valid: boolean }>("/api/incidents/verify", token),
       ]);
       setIncidents(eventData.incidents);
       setMetrics(metricData);
       setTrends(trendData.trends);
       setPolicies(policyData.policies);
       setPolicyText(JSON.stringify({ policies: policyData.policies }, null, 2));
+      setAuditValid(auditData.valid);
       if (user?.role === "admin") {
         const approvalData = await request<{ approvals: Approval[] }>("/api/approvals", token);
         setApprovals(approvalData.approvals);
@@ -253,34 +256,47 @@ export default function App() {
     );
   }
 
-  const nav = ["Overview", "Secure chat", "Incidents", ...(user.role === "admin" ? ["Approvals", "Policies"] : [])];
+  const nav = [
+    { page: "Overview", label: "Command center", icon: "▦" },
+    { page: "Secure chat", label: "Secure chat", icon: "▱" },
+    { page: "Incidents", label: "Incidents", icon: "△" },
+    ...(user.role === "admin" ? [
+      { page: "Approvals", label: "Approval queue", icon: "✓" },
+      { page: "Policies", label: "Policy control", icon: "☷" },
+    ] : []),
+  ];
   return (
     <div className="app-shell">
       <aside className="sidebar">
-        <a className="brand" href="#"><span className="brand-mark small">H</span><span>hinderman<small>AI SECURITY GATEWAY</small></span></a>
-        <div className="nav-label">WORKSPACE</div>
-        <nav>{nav.map((item, index) => (
-          <button key={item} className={`nav-item ${page === item ? "selected" : ""}`} onClick={() => setPage(item)}>
-            <span className="nav-icon">{["◫", "⌘", "◷", "✓", "⚙"][index]}</span>{item}
-            {item === "Approvals" && approvals.filter((a) => a.status === "pending").length > 0 &&
+        <a className="brand" href="#"><span className="brand-mark small">✳</span><span>Hinderman<small>AI SECURITY GATEWAY</small></span></a>
+        <div className="gateway-status"><i /> SYSTEM ONLINE <span>v1.2.0</span></div>
+        <div className="nav-label">CONTROL DECK</div>
+        <nav aria-label="Primary navigation">{nav.map((item) => (
+          <button key={item.page} className={`nav-item ${page === item.page ? "selected" : ""}`} onClick={() => setPage(item.page)}>
+            <span className="nav-icon">{item.icon}</span>{item.label}
+            {item.page === "Incidents" && incidents.length > 0 && <b className="nav-count">{incidents.length}</b>}
+            {item.page === "Approvals" && approvals.filter((a) => a.status === "pending").length > 0 &&
               <b className="nav-count">{approvals.filter((a) => a.status === "pending").length}</b>}
           </button>
         ))}</nav>
-        <div className="sidebar-bottom"><div className="status-dot" /> Gateway online <span className="version">v1.2.0</span></div>
+        <div className="sidebar-bottom">
+          <div className="audit-status"><i /> <span><b>{auditValid === false ? "Audit check failed" : auditValid ? "Audit chain verified" : "Audit verification pending"}</b><small>{incidents.length.toLocaleString()} events · SHA-256</small></span></div>
+          <button className="sidebar-user" onClick={logout}><span className="avatar">{user.role[0].toUpperCase()}</span><span>{user.department}<small>{user.role.replace("_", " ")}</small></span><b>⌄</b></button>
+        </div>
       </aside>
       <main className="main-area">
         <header className="topbar">
-          <div><span className="breadcrumb">Workspace</span><span className="slash">/</span><b>{page}</b></div>
+          <div className="workspace-code">CC6-AI03 <span>/</span> <b>{nav.find((item) => item.page === page)?.label.toUpperCase()}</b></div>
           <div className="top-actions"><span className="model-chip"><i /> {import.meta.env.VITE_LLM_LABEL ?? "qwen3.5:4b"}</span>
-            <button className="profile" onClick={logout}><span className="avatar">{user.role[0].toUpperCase()}</span>
-              <span>{user.role.replace("_", " ")}<small>{user.department}</small></span><b>⌄</b></button></div>
+            <span className="viewing-as">VIEWING AS</span><span className="view-role">{user.role.replace("_", " ")} <b>⌄</b></span></div>
         </header>
         <section className="page-content">
           {error && <div className="toast error">{error}<button onClick={() => setError("")}>×</button></div>}
           {notice && <div className="toast success">{notice}<button onClick={() => setNotice("")}>×</button></div>}
-          {page === "Overview" && <Overview incidents={incidents} metrics={metrics} trends={trends} categories={categoryCounts} verify={() => request<{ valid: boolean }>("/api/incidents/verify", token).then((r) => setNotice(r.valid ? "Audit hash chain verified." : "Audit chain verification failed.")).catch((e) => setError(e.message))} />}
+          {page === "Overview" && <Overview incidents={incidents} metrics={metrics} trends={trends} categories={categoryCounts} policies={policies} auditValid={auditValid} model={import.meta.env.VITE_LLM_LABEL ?? "qwen3.5:4b"} onTestGateway={() => setPage("Secure chat")} onViewLedger={() => setPage("Incidents")} />}
           {page === "Secure chat" && <section className="content-grid">
-            <div className="panel chat-panel"><div className="panel-head"><div><p className="eyebrow">SECURE CONVERSATION</p><h2>Ask with confidence.</h2></div><span className="pill safe">● Protected</span></div>
+            <div className="panel chat-panel"><div className="page-title"><div><p className="eyebrow">LIVE REQUEST PATH</p><h1>Secure AI chat.</h1><p className="muted">Every prompt is inspected, sanitised, authorised and audited before it reaches the model.</p></div><span className="pill safe">● Protected session</span></div>
+              <div className="chat-model-bar"><span>PROTECTED SESSION</span><b>OLLAMA · {import.meta.env.VITE_LLM_LABEL ?? "qwen3.5:4b"}</b></div>
               <div className="sample-row">{samples.map((sample) => <button key={sample.label} className="sample" onClick={() => { setUseRag(Boolean(sample.use_rag)); void sendChat(undefined, sample); }}>{sample.label} ↗</button>)}</div>
               {chat && <div className={`chat-result ${chat.action_taken}`}><div className="result-title"><span>{chat.action_taken === "block" ? "⛨" : "✳"} Gateway response</span><span className={`pill ${chat.action_taken}`}>{chat.action_taken}</span></div><p>{chat.response}</p>
                 {chat.gateway_report.masked_before_model && chat.gateway_report.sanitized_prompt && <div className="prompt-diff"><div><small>YOUR PROMPT</small><p>{prompt}</p></div><div><small>MODEL RECEIVED</small><p>{chat.gateway_report.sanitized_prompt}</p></div></div>}
@@ -309,42 +325,76 @@ export default function App() {
               <ProtectionRow title="Privacy-safe audit" text="Events are recorded without raw prompt content." />
             </div>
           </section>}
-          {page === "Incidents" && <Incidents events={incidents} />}
+          {page === "Incidents" && <><PageHeading eyebrow="PRIVACY-SAFE AUDIT" title="Incident ledger." description="Tamper-evident activity without storing the sensitive content that triggered it." /><Incidents events={incidents} /></>}
           {page === "Approvals" && <Approvals approvals={approvals} decide={decide} />}
-          {page === "Policies" && <section className="panel policy-editor"><div className="panel-head"><div><p className="eyebrow">LIVE POLICY CONFIGURATION</p><h2>Gateway rules</h2><p className="muted">Changes are validated and hot-reloaded immediately.</p></div><span className="pill safe">{policies.length} active rules</span></div>
-            <form onSubmit={(e) => void savePolicies(e)}><textarea className="code-editor" value={policyText} onChange={(e) => setPolicyText(e.target.value)} spellCheck={false} /><div className="policy-actions"><span className="muted">JSON request body · Policy YAML is stored by the gateway</span><button className="button primary">Validate &amp; save ↗</button></div></form></section>}
+          {page === "Policies" && <section className="policy-page"><PageHeading eyebrow="HOT-RELOAD CONTROL" title="Policy control." description="Change gateway behaviour without a code deployment. Rules are applied in severity order." /><div className="policy-sync"><span><i /> policies.yaml synced</span><span>Policy editor · {policies.length} active rules</span></div><section className="policy-list">{policies.map((policy) => <article className="policy-row" key={policy.id}><code>{policy.id}</code><span><b>{policy.id.replaceAll("-", " ")}</b><small>{JSON.stringify(policy.when)}</small></span><strong className={`policy-action ${policy.action}`}>{policy.action}</strong></article>)}</section><section className="panel policy-editor"><div className="panel-head"><div><p className="eyebrow">LIVE POLICY CONFIGURATION</p><h2>Edit gateway rules</h2><p className="muted">Changes are validated and hot-reloaded immediately.</p></div></div>
+            <form onSubmit={(e) => void savePolicies(e)}><textarea className="code-editor" value={policyText} onChange={(e) => setPolicyText(e.target.value)} spellCheck={false} /><div className="policy-actions"><span className="muted">JSON request body · Policy YAML is stored by the gateway</span><button className="button primary">Validate &amp; save ↗</button></div></form></section></section>}
         </section>
       </main>
     </div>
   );
 }
 
-function Overview({ incidents, metrics, trends, categories, verify }: {
+function Overview({ incidents, metrics, trends, categories, policies, auditValid, model, onTestGateway, onViewLedger }: {
   incidents: Event[]; metrics: Record<string, unknown>;
   trends: { date: string; incidents: number; blocked: number }[];
-  categories: [string, number][]; verify: () => void;
+  categories: [string, number][]; policies: Policy[]; auditValid: boolean | null; model: string;
+  onTestGateway: () => void; onViewLedger: () => void;
 }) {
+  const actions = (metrics.actions ?? {}) as Record<string, number>;
+  const categoryTotal = categories.reduce((total, [, count]) => total + count, 0);
+  const palette = ["#2518e8", "#ff647c", "#9295f5", "#f1bd4f", "#28a88a", "#8e6eae"];
+  const health = [
+    ["PII + secrets detection", "Rules active", true],
+    ["Prompt injection screening", "Rule engine active", true],
+    ["ACL document retrieval", "Role filters active", true],
+    ["Audit hash chain", auditValid ? "Verified" : auditValid === false ? "Verification failed" : "Checking", auditValid],
+  ] as const;
   return <>
-    <div className="page-title"><div><p className="eyebrow">SECURITY AT A GLANCE</p><h1>Your AI boundary, <span>in control.</span></h1><p className="muted">A live view of activity passing through your gateway.</p></div><button className="button secondary" onClick={verify}>↻ Verify audit chain</button></div>
+    <section className="hero-banner">
+      <div className="hero-copy"><p className="eyebrow"><span /> AI SECURITY / LIVE OVERVIEW</p><h1>Every prompt.<br /><em>Under control.</em></h1>
+        <p>A checkpoint between your people and every AI model. Detect leaks, stop attacks and prove every decision.</p>
+        <button className="hero-cta" onClick={onTestGateway}>TEST THE GATEWAY <span>→</span></button>
+        <div className="hero-foot"><b>{policies.length || "—"}</b><span>ACTIVE SECURITY<br />POLICIES</span><i /> INBOUND → OUTBOUND</div>
+      </div>
+      <div className="hero-art" aria-hidden="true"><div className="art-orbit orbit-a" /><div className="art-orbit orbit-b" /><div className="art-sun" /><div className="art-shard shard-a" /><div className="art-shard shard-b" /><div className="art-ring" /><div className="art-stamp">PROTECT<br />EVERY<br />PROMPT</div><div className="art-caption">LOCAL MODEL&nbsp;&nbsp; · &nbsp;&nbsp;NO EXTERNAL EGRESS</div></div>
+    </section>
     <div className="stat-grid">
-      <Stat label="Inspected requests" value={metrics.total_incidents ?? 0} foot="Privacy-safe event trail" icon="◷" />
-      <Stat label="Blocked requests" value={metrics.blocked_requests ?? 0} foot="Policy prevented model access" icon="⛨" />
-      <Stat label="Pending approvals" value={metrics.approvals_pending ?? 0} foot="Human review required" icon="✓" />
-      <Stat label="Avg. gateway latency" value={`${metrics.average_latency_ms ?? 0} ms`} foot="Inspection + response pipeline" icon="ϟ" />
+      <Stat label="REQUESTS / RECORDED" value={metrics.total_incidents ?? 0} foot="Inspected by the gateway" icon="↗" />
+      <Stat label="THREATS STOPPED" value={metrics.blocked_requests ?? 0} foot={`${metrics.approvals_pending ?? 0} pending review`} icon="△" />
+      <Stat label="SENSITIVE VALUES MASKED" value={actions.mask ?? 0} foot="No raw values in audit" icon="◈" />
+      <Stat label="GATEWAY LATENCY" value={`${metrics.average_latency_ms ?? 0}`} foot="ms · inspection + response" icon="⌁" />
     </div>
-    <div className="content-grid overview-grid">
-      <div className="panel chart-panel"><div className="panel-head"><div><p className="eyebrow">REQUEST ACTIVITY</p><h2>Incidents over time</h2></div><span className="pill neutral">Last 30 days</span></div>
-        <div className="chart-wrap">{trends.length ? <ResponsiveContainer width="100%" height="100%"><AreaChart data={trends}>
-          <defs><linearGradient id="fillIncidents" x1="0" y1="0" x2="0" y2="1"><stop offset="0%" stopColor="#85e2af" stopOpacity={0.28} /><stop offset="95%" stopColor="#85e2af" stopOpacity={0} /></linearGradient></defs>
-          <CartesianGrid stroke="#27332e" vertical={false} /><XAxis dataKey="date" tick={{ fill: "#83918a", fontSize: 11 }} axisLine={false} tickLine={false} /><YAxis allowDecimals={false} tick={{ fill: "#83918a", fontSize: 11 }} axisLine={false} tickLine={false} />
-          <Tooltip contentStyle={{ background: "#151e19", border: "1px solid #34453b", borderRadius: 10 }} /><Area type="monotone" dataKey="incidents" stroke="#85e2af" fill="url(#fillIncidents)" strokeWidth={2} /></AreaChart></ResponsiveContainer> : <div className="empty-chart">Your gateway activity will appear here.</div>}</div>
-      </div>
-      <div className="panel category-panel"><div className="panel-head"><div><p className="eyebrow">TOP DETECTIONS</p><h2>Finding categories</h2></div><span className="icon-soft">⌕</span></div>
-        <div className="category-list">{categories.length ? categories.map(([name, count]) => <div className="category-row" key={name}><span className="category-icon">◈</span><span>{name.replaceAll("_", " ")}</span><b>{count}</b></div>) : <p className="muted">No findings have been recorded yet.</p>}</div>
-      </div>
+    <div className="dashboard-grid">
+      <article className="panel chart-panel"><div className="panel-head"><div><p className="eyebrow">REQUEST ACTIVITY</p><h2>Live gateway traffic</h2></div><div className="chart-legend"><span><i /> INSPECTED</span><span><i /> BLOCKED</span></div></div>
+        <div className="chart-wrap">{trends.length ? <ResponsiveContainer width="100%" height="100%"><BarChart data={trends} barGap={4}>
+          <CartesianGrid stroke="#e9e5dc" vertical={false} /><XAxis dataKey="date" tick={{ fill: "#96928a", fontSize: 10 }} axisLine={false} tickLine={false} /><YAxis allowDecimals={false} tick={{ fill: "#96928a", fontSize: 10 }} axisLine={false} tickLine={false} />
+          <Tooltip contentStyle={{ background: "#fffdf7", border: "1px solid #e5e0d5", borderRadius: 4, color: "#18184a" }} /><Bar dataKey="incidents" name="Inspected" fill="#2518e8" radius={[2, 2, 0, 0]} /><Bar dataKey="blocked" name="Blocked" fill="#f27382" radius={[2, 2, 0, 0]} /></BarChart></ResponsiveContainer> : <div className="empty-chart">Your gateway activity will appear here.</div>}</div>
+      </article>
+      <article className="panel category-panel"><div className="panel-head"><div><p className="eyebrow">FINDINGS / RECORDED</p><h2>Threat composition</h2></div><span className="pill neutral">{categoryTotal} TOTAL</span></div>
+        {categories.length ? <div className="threat-layout"><div className="threat-chart"><ResponsiveContainer width="100%" height="100%"><PieChart><Pie data={categories.map(([name, value]) => ({ name, value }))} dataKey="value" nameKey="name" innerRadius="65%" outerRadius="94%" paddingAngle={2} stroke="none">{categories.map(([name], index) => <Cell key={name} fill={palette[index % palette.length]} />)}</Pie><Tooltip /></PieChart></ResponsiveContainer><div className="threat-total"><b>{categoryTotal}</b><small>FINDINGS</small></div></div>
+          <div className="category-list">{categories.slice(0, 5).map(([name, count], index) => <div className="category-row" key={name}><span className="category-icon" style={{ backgroundColor: palette[index % palette.length] }} /><span>{name.replaceAll("_", " ")}</span><b>{count}</b></div>)}</div></div>
+          : <div className="empty-state"><span>◈</span><b>No findings yet</b><p>Detection categories appear after requests are inspected.</p></div>}
+      </article>
+      <article className="panel decisions-panel"><div className="panel-head"><div><p className="eyebrow">RECENT DECISIONS</p><h2>Privacy-safe incident feed</h2></div><button className="text-link" onClick={onViewLedger}>VIEW LEDGER →</button></div>
+        {incidents.length ? <div className="decision-feed">{incidents.slice(0, 5).map((event) => {
+          const title = event.snippet_redacted?.split("\n")[0]?.slice(0, 100)
+            || event.findings.map((finding) => finding.type.replaceAll("_", " ")).slice(0, 2).join(" + ")
+            || "Request inspected";
+          const actionLabel = event.action === "mask" ? "MASKED" : event.action === "block" ? "BLOCKED" : event.action === "require_approval" ? "REVIEW" : event.action.toUpperCase();
+          return <div className="decision-row" key={event.id}><span className={`decision-icon ${event.action}`}>{event.action === "mask" ? "◈" : event.action === "block" ? "△" : "✓"}</span><span className="decision-info"><b>{title}</b><small>{event.user_id} · {new Date(event.ts).toLocaleTimeString()}</small></span><code>{event.policy_id ?? "—"}</code><strong className={`decision-action ${event.action}`}>{actionLabel}</strong></div>;
+        })}</div> : <div className="empty-state"><span>◷</span><b>No decisions yet</b><p>Inspected requests will appear in the ledger.</p></div>}
+      </article>
+      <article className="system-panel"><p className="eyebrow">SYSTEM HEALTH</p><h2>Security layers.</h2><p className="system-intro">Local controls protecting every request.</p>
+        <div className="health-list">{health.map(([label, status, ready]) => <div className="health-row" key={label}><span>{label}<small>{status}</small></span><i className={ready === false ? "warning" : ""} /></div>)}</div>
+        <div className="active-model"><small>ACTIVE MODEL</small><b>{model}</b><span>LOCAL · NO EXTERNAL EGRESS</span></div>
+      </article>
     </div>
-    <Incidents events={incidents.slice(0, 5)} compact />
   </>;
+}
+
+function PageHeading({ eyebrow, title, description }: { eyebrow: string; title: string; description: string }) {
+  return <div className="page-title"><div><p className="eyebrow">{eyebrow}</p><h1>{title}</h1><p className="muted">{description}</p></div></div>;
 }
 
 function Stat({ label, value, foot, icon }: { label: string; value: unknown; foot: string; icon: string }) {
@@ -352,19 +402,18 @@ function Stat({ label, value, foot, icon }: { label: string; value: unknown; foo
 }
 
 function Incidents({ events, compact = false }: { events: Event[]; compact?: boolean }) {
-  return <div className="panel incidents-panel"><div className="panel-head"><div><p className="eyebrow">PRIVACY-SAFE AUDIT</p><h2>{compact ? "Recent activity" : "Gateway incidents"}</h2></div><span className="pill neutral">{events.length} events</span></div>
-    {events.length ? <div className="table-scroll"><table><thead><tr><th>Event</th><th>User</th><th>Finding summary</th><th>Policy</th><th>Action</th></tr></thead>
-      <tbody>{events.map((event) => <tr key={event.id}><td><b>{new Date(event.ts).toLocaleString()}</b><small>{event.id.slice(0, 8)}</small></td><td>{event.user_id}</td><td>{event.findings.map((f) => `${f.type} ×${f.count}`).join(", ") || "No findings"}</td><td>{event.policy_id ?? "—"}</td><td><span className={`pill ${event.action}`}>{event.action}</span></td></tr>)}</tbody></table></div>
+  return <div className="panel incidents-panel"><div className="panel-head"><div><p className="eyebrow">{compact ? "RECENT DECISIONS" : "PRIVACY-SAFE AUDIT"}</p><h2>{compact ? "Recent activity" : "Gateway incidents"}</h2></div><span className="pill neutral">{events.length} events</span></div>
+    {events.length ? <div className="table-scroll"><table><thead><tr><th>Event</th><th>User</th><th>Sanitized context</th><th>Finding summary</th><th>Policy</th><th>Action</th></tr></thead>
+      <tbody>{events.map((event) => <tr key={event.id}><td><b>{new Date(event.ts).toLocaleString()}</b><small>{event.id.slice(0, 8)}</small></td><td>{event.user_id}</td><td className="audit-context" title={event.snippet_redacted}>{event.snippet_redacted || "—"}</td><td>{event.findings.map((f) => `${f.type} ×${f.count}`).join(", ") || "No findings"}</td><td>{event.policy_id ?? "—"}</td><td><span className={`pill ${event.action}`}>{event.action}</span></td></tr>)}</tbody></table></div>
       : <div className="empty-state"><span>◷</span><b>Nothing to report yet</b><p>Requests inspected by the gateway appear here.</p></div>}
   </div>;
 }
 
 function Approvals({ approvals, decide }: { approvals: Approval[]; decide: (id: string, decision: "approved" | "rejected") => void }) {
-  return <div className="panel incidents-panel"><div className="panel-head"><div><p className="eyebrow">HUMAN IN THE LOOP</p><h2>Approval queue</h2><p className="muted">Review flagged requests before further processing.</p></div><span className="pill neutral">{approvals.filter((a) => a.status === "pending").length} pending</span></div>
+  return <><PageHeading eyebrow="HUMAN IN THE LOOP" title="Approval queue." description="Review uncertain requests before any content is allowed to continue to the model." /><div className="panel incidents-panel"><div className="panel-head"><div><p className="eyebrow">PENDING REVIEW</p><h2>Requests awaiting a decision</h2></div><span className="pill neutral">{approvals.filter((a) => a.status === "pending").length} pending</span></div>
     {approvals.length ? <div className="approval-list">{approvals.map((approval) => <article className="approval-card" key={approval.id}><div><span className={`pill ${approval.status}`}>{approval.status}</span><h3>Request {approval.request_id.slice(0, 8)}</h3><p>{approval.snippet_redacted}</p><small>{approval.findings.map((f) => f.type).join(", ")} · {new Date(approval.created_at).toLocaleString()}</small></div>
       {approval.status === "pending" && <div className="approval-buttons"><button className="button secondary" onClick={() => decide(approval.id, "rejected")}>Reject</button><button className="button primary" onClick={() => decide(approval.id, "approved")}>Approve</button></div>}</article>)}</div>
-      : <div className="empty-state"><span>✓</span><b>No requests awaiting review</b><p>Requests requiring approval will show up here.</p></div>}
-  </div>;
+      : <div className="empty-state"><span>✓</span><b>No requests awaiting review</b><p>Requests requiring approval will show up here.</p></div>}</div></>;
 }
 
 function ProtectionRow({ title, text }: { title: string; text: string }) {
