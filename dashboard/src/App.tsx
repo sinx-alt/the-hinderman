@@ -1,7 +1,8 @@
-import { FormEvent, useCallback, useEffect, useMemo, useState } from "react";
+import { ChangeEvent, FormEvent, useCallback, useEffect, useMemo, useState } from "react";
 import {
   Area, AreaChart, CartesianGrid, ResponsiveContainer, Tooltip, XAxis, YAxis,
 } from "recharts";
+import "./image-input.css";
 
 const API = import.meta.env.VITE_API_URL ?? "http://localhost:8000";
 type User = { user_id: string; role: string; department: string; clearance: number };
@@ -16,8 +17,15 @@ type Approval = {
 };
 type ChatResult = {
   response: string; action_taken: string; findings_summary: { type: string; count: number }[];
-  gateway_report: { policy_ids: string[]; denied_document_count: number; masked_before_model: boolean; sanitized_prompt?: string };
+  gateway_report: {
+    policy_ids: string[]; denied_document_count: number; masked_before_model: boolean;
+    sanitized_prompt?: string; image_text_scanned?: boolean;
+  };
 };
+type SelectedImage = { name: string; mime: "image/png" | "image/jpeg"; dataB64: string; preview: string };
+
+const MAX_IMAGES = 3;
+const MAX_IMAGE_BYTES = 5 * 1024 * 1024;
 
 const samples = [
   { label: "PII masking", prompt: "Summarise this: Rahul, Aadhaar 2345 6789 0124, PAN ABCDE1234F" },
@@ -49,6 +57,7 @@ export default function App() {
   const [error, setError] = useState("");
   const [loading, setLoading] = useState(false);
   const [prompt, setPrompt] = useState("");
+  const [images, setImages] = useState<SelectedImage[]>([]);
   const [useRag, setUseRag] = useState(false);
   const [chat, setChat] = useState<ChatResult | null>(null);
   const [incidents, setIncidents] = useState<Event[]>([]);
@@ -113,20 +122,75 @@ export default function App() {
     setUser(null);
   }
 
+  async function addImages(event: ChangeEvent<HTMLInputElement>) {
+    const files = Array.from(event.currentTarget.files ?? []);
+    event.currentTarget.value = "";
+    if (!files.length) return;
+    setError("");
+    if (images.length + files.length > MAX_IMAGES) {
+      setError(`You can attach up to ${MAX_IMAGES} images per request.`);
+      return;
+    }
+    const unsupported = files.find((file) => file.type !== "image/png" && file.type !== "image/jpeg");
+    if (unsupported) {
+      setError(`${unsupported.name} is not a PNG or JPEG image.`);
+      return;
+    }
+    const oversized = files.find((file) => file.size > MAX_IMAGE_BYTES);
+    if (oversized) {
+      setError(`${oversized.name} is larger than the 5 MB per-image limit.`);
+      return;
+    }
+    try {
+      const selected = await Promise.all(files.map(async (file): Promise<SelectedImage> => {
+        const dataUrl = await new Promise<string>((resolve, reject) => {
+          const reader = new FileReader();
+          reader.onerror = () => reject(new Error(`Could not read ${file.name}.`));
+          reader.onload = () => typeof reader.result === "string"
+            ? resolve(reader.result)
+            : reject(new Error(`Could not read ${file.name}.`));
+          reader.readAsDataURL(file);
+        });
+        const separator = dataUrl.indexOf(",");
+        if (separator < 0) throw new Error(`Could not encode ${file.name}.`);
+        return {
+          name: file.name,
+          mime: file.type as SelectedImage["mime"],
+          dataB64: dataUrl.slice(separator + 1),
+          preview: dataUrl,
+        };
+      }));
+      setImages((current) => [...current, ...selected]);
+    } catch (reason) {
+      setError(reason instanceof Error ? reason.message : "Unable to read the selected image.");
+    }
+  }
+
   async function sendChat(event?: FormEvent, preset?: typeof samples[number]) {
     event?.preventDefault();
-    const text = preset?.prompt ?? prompt;
-    if (!text.trim()) return;
+    const text = preset?.prompt ?? prompt.trim();
+    const attachedImages = preset ? [] : images;
+    if (!text && !attachedImages.length) {
+      setError("Enter a prompt or attach an image.");
+      return;
+    }
+    const requestPrompt = text || "Please inspect the attached image.";
     setLoading(true);
     setError("");
     setChat(null);
     try {
       const result = await request<ChatResult>("/v1/chat", token, {
         method: "POST",
-        body: JSON.stringify({ prompt: text, use_rag: preset?.use_rag ?? useRag, attachments: [] }),
+        body: JSON.stringify({
+          prompt: requestPrompt,
+          use_rag: preset?.use_rag ?? useRag,
+          attachments: attachedImages.map(({ mime, dataB64 }) => ({
+            kind: "image", mime, data_b64: dataB64,
+          })),
+        }),
       });
       setChat(result);
-      setPrompt(text);
+      setPrompt(requestPrompt);
       await refresh();
     } catch (reason) {
       setError(reason instanceof Error ? reason.message : "The request failed");
@@ -220,9 +284,22 @@ export default function App() {
               <div className="sample-row">{samples.map((sample) => <button key={sample.label} className="sample" onClick={() => { setUseRag(Boolean(sample.use_rag)); void sendChat(undefined, sample); }}>{sample.label} ↗</button>)}</div>
               {chat && <div className={`chat-result ${chat.action_taken}`}><div className="result-title"><span>{chat.action_taken === "block" ? "⛨" : "✳"} Gateway response</span><span className={`pill ${chat.action_taken}`}>{chat.action_taken}</span></div><p>{chat.response}</p>
                 {chat.gateway_report.masked_before_model && chat.gateway_report.sanitized_prompt && <div className="prompt-diff"><div><small>YOUR PROMPT</small><p>{prompt}</p></div><div><small>MODEL RECEIVED</small><p>{chat.gateway_report.sanitized_prompt}</p></div></div>}
-                <div className="result-meta">Findings: {chat.findings_summary.map((item) => `${item.type} ×${item.count}`).join(", ") || "none"} · {chat.gateway_report.masked_before_model ? "Sensitive data masked before model" : "No prompt changes"}</div></div>}
+                <div className="result-meta">Findings: {chat.findings_summary.map((item) => `${item.type} ×${item.count}`).join(", ") || "none"} · {chat.gateway_report.image_text_scanned ? "Image OCR scanned" : chat.gateway_report.masked_before_model ? "Sensitive data masked before model" : "No prompt changes"}</div></div>}
               <form className="composer" onSubmit={(e) => void sendChat(e)}><textarea value={prompt} onChange={(e) => setPrompt(e.target.value)} placeholder="Type a prompt. Sensitive content is inspected before it reaches the model…" rows={4} />
-                <div className="composer-foot"><label className="check"><input type="checkbox" checked={useRag} onChange={(e) => setUseRag(e.target.checked)} /> Search permitted company docs</label>
+                {images.length > 0 && <div className="image-attachments" aria-label="Selected images">{images.map((image, index) =>
+                  <div className="image-attachment" key={`${image.name}-${index}`}>
+                    <img src={image.preview} alt={`Preview: ${image.name}`} />
+                    <span title={image.name}>{image.name}</span>
+                    <button type="button" aria-label={`Remove ${image.name}`} onClick={() => setImages((current) => current.filter((_, itemIndex) => itemIndex !== index))}>×</button>
+                  </div>)}</div>}
+                <div className="composer-foot"><div className="composer-options">
+                    <label className={`attach-button ${images.length >= MAX_IMAGES ? "disabled" : ""}`}>
+                      <input type="file" accept="image/png,image/jpeg" multiple disabled={images.length >= MAX_IMAGES || loading} onChange={(e) => void addImages(e)} />
+                      <span aria-hidden="true">▧</span> Add image
+                    </label>
+                    <label className="check"><input type="checkbox" checked={useRag} onChange={(e) => setUseRag(e.target.checked)} /> Search permitted company docs</label>
+                    <span className="attachment-hint">PNG or JPEG · 5 MB max · up to 3</span>
+                  </div>
                   <button className="button primary" disabled={loading}>{loading ? "Inspecting…" : "Send securely"} <span>↑</span></button></div></form>
             </div>
             <div className="panel side-note"><p className="eyebrow">INBOUND PROTECTION</p><h3>Every prompt passes through a checkpoint.</h3>

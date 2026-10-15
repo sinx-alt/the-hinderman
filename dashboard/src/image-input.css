@@ -1,0 +1,114 @@
+.composer-options {
+  display: flex;
+  min-width: 0;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 10px 16px;
+}
+
+.attach-button {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  border: 1px solid #34443a;
+  border-radius: 7px;
+  padding: 7px 9px;
+  color: #c1d0c5;
+  font-size: 11px;
+  cursor: pointer;
+}
+
+.attach-button:hover {
+  border-color: #629171;
+  color: #dff7e7;
+}
+
+.attach-button.disabled {
+  opacity: 0.55;
+  cursor: not-allowed;
+}
+
+.attach-button input {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  white-space: nowrap;
+  clip-path: inset(50%);
+}
+
+.attach-button:focus-within {
+  outline: 2px solid #8be5b0;
+  outline-offset: 2px;
+}
+
+.attachment-hint {
+  color: #77847b;
+  font-size: 10px;
+}
+
+.image-attachments {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  padding: 0 12px 12px;
+}
+
+.image-attachment {
+  display: flex;
+  max-width: 220px;
+  min-width: 0;
+  align-items: center;
+  gap: 8px;
+  border: 1px solid #34443a;
+  border-radius: 8px;
+  background: #19221d;
+  padding: 5px;
+}
+
+.image-attachment img {
+  width: 38px;
+  height: 38px;
+  flex: 0 0 auto;
+  border-radius: 5px;
+  object-fit: cover;
+}
+
+.image-attachment span {
+  overflow: hidden;
+  color: #c1cdc4;
+  font-size: 10px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.image-attachment button {
+  flex: 0 0 auto;
+  border: 0;
+  border-radius: 5px;
+  background: transparent;
+  color: #9ba79f;
+  font-size: 18px;
+  line-height: 1;
+}
+
+.image-attachment button:hover {
+  background: #3a2423;
+  color: #ff9c94;
+}
+
+@media (max-width: 650px) {
+  .composer-foot {
+    align-items: flex-end;
+    gap: 12px;
+  }
+
+  .composer-options {
+    gap: 9px;
+  }
+
+  .attachment-hint {
+    width: 100%;
+  }
+}

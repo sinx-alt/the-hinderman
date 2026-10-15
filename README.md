@@ -1,113 +1,250 @@
-# The Hinderman — AI Security Gateway
+# The Hinderman
 
-A local-first gateway that inspects prompts and model responses, applies editable security policies, restricts document retrieval by user access, and records privacy-safe audit events. Ollama with `qwen3.5:4b` is the default model; stub mode remains available for offline development and tests.
+The Hinderman is a local-first AI security gateway prototype. It places a policy and inspection layer between users and an LLM: prompts and image OCR text are screened before model invocation, model responses are checked before returning, RAG retrieval is access-controlled, and audit events avoid storing raw prompt/OCR content.
 
-## Quick start (Python)
+The default local model is Ollama `qwen3.5:4b`. The gateway also supports deterministic stub mode for development and automated tests.
+
+> **Prototype notice:** This is a demonstration project, not a certified DLP, identity, or production security product. Demo users and the default signing secret are not suitable for an exposed or production deployment.
+
+## Features
+
+- FastAPI gateway with typed request/response contracts and editable YAML policies.
+- PII and credential detection, including Aadhaar, PAN, payment cards, contact details, passwords, and common API keys.
+- Prompt-injection scanning with normalization for common homoglyphs, leetspeak, zero-width characters, and selected Base64-encoded instructions.
+- Policy actions: `allow`, `warn`, `mask`, `redact`, `block`, and `require_approval`.
+- Optional role-, department-, and clearance-filtered retrieval over seeded synthetic documents.
+- PNG/JPEG image input in Secure Chat: up to three images, at most 5 MB each. Tesseract OCR text is screened with the prompt; image bytes are not sent to the LLM. The dashboard displays previews and allows removal before sending.
+- Canary-response detection and privacy-safe, hash-chained audit events.
+- React/Vite dashboard for secure chat, image uploads, incidents, metrics, approvals, and policy editing.
+
+## Requirements
+
+- Python 3.11 or newer.
+- Node.js and npm, for building or running the dashboard.
+- Ollama and the configured model for live local LLM responses.
+- Tesseract OCR for image requests. The Docker gateway image installs it; native Windows runs need Tesseract installed separately.
+- Docker Desktop with its Linux container engine, if using Compose.
+
+## Quick start: Windows native
+
+From the repository root in PowerShell:
 
 ```powershell
-py -m venv .venv
+py -3 -m venv .venv
 .\.venv\Scripts\Activate.ps1
 python -m pip install -r requirements.txt
-python -m uvicorn gateway.main:app --reload
-```
 
-For the complete local Ollama + dashboard prototype, build the dashboard once and launch both services with the included PowerShell scripts:
+Push-Location dashboard
+npm.cmd install
+npm.cmd run build
+Pop-Location
 
-```powershell
-cd dashboard
-npm install
-npm run build
-cd ..
 .\scripts\start.ps1
 ```
 
-Open `http://localhost:5173`; API docs are at `http://localhost:8000/docs`. Stop both local services with `.\scripts\stop.ps1`. Runtime logs and process IDs are saved under the ignored `data\runtime` directory.
+The start script launches the API and serves the built dashboard:
 
-Open `http://localhost:8000/docs` for the API and `http://localhost:8000/health` for readiness. For the dashboard, use the Docker Compose instructions below or run the Vite app in `dashboard/`.
+- Dashboard: <http://localhost:5173>
+- API: <http://localhost:8000>
+- OpenAPI docs: <http://localhost:8000/docs>
+- Health: <http://localhost:8000/health>
 
-## Quick start (Docker)
+Stop native services with:
 
 ```powershell
+.\scripts\stop.ps1
+```
+
+The script expects Ollama to be reachable at `http://localhost:11434` and Tesseract to be installed. Runtime logs and process information are written under `data\runtime` (ignored by Git).
+
+To run the API manually for development, install the Python requirements as above and use:
+
+```powershell
+$env:LLM_MODE = "stub"  # or "ollama"
+$env:OCR_MODE = "stub"  # use "tesseract" when Tesseract is installed
+python -m uvicorn gateway.main:app --reload
+```
+
+Run the dashboard dev server in a second terminal:
+
+```powershell
+Set-Location dashboard
+npm.cmd install
+npm.cmd run dev
+```
+
+The development dashboard is at <http://localhost:5173>. Set `VITE_API_URL` at dashboard build/dev time if the API is not at `http://localhost:8000`.
+
+## Quick start: Docker Compose
+
+Ensure Docker Desktop is using Linux containers and Ollama is running on the host with the configured model available:
+
+```powershell
+ollama pull qwen3.5:4b
 docker compose up --build
 ```
 
-The dashboard is at `http://localhost:3000`; the API and OpenAPI UI are at `http://localhost:8000` and `http://localhost:8000/docs`. Compose defaults to `LLM_MODE=ollama`, `LLM_MODEL=ollama/qwen3.5:4b`, and connects to Ollama on the Windows host at port 11434. Persistent local audit data is stored in the `gateway-data` volume. To run without Ollama, set `LLM_MODE=stub`.
+Compose exposes the dashboard at <http://localhost:3000>, the API at <http://localhost:8000>, and API docs at <http://localhost:8000/docs>. The gateway connects to host Ollama through `http://host.docker.internal:11434`, installs Tesseract in its image, and persists audit data in the `gateway-data` Docker volume.
+
+Stop the services and remove the Compose network (retaining the named audit volume):
+
+```powershell
+docker compose down
+```
+
+To delete the audit volume as well, use `docker compose down --volumes`; this permanently removes the persisted local audit database.
+
+If Docker Desktop cannot read a workspace located in a protected or synchronized folder (for example, a OneDrive path), move/clone the repository to a Docker-shared local directory, or stage the source in an accessible local directory and run Compose with that directory's `docker-compose.yml`. Do not include `.git`, virtual environments, dependency folders, or generated build output in the staged context.
+
+To use the deterministic adapter without Ollama:
+
+```powershell
+$env:LLM_MODE = "stub"
+docker compose up --build
+```
+
+Compose environment variables may be set in the shell or in an untracked `.env` file in the Compose directory. Supported settings include:
+
+| Variable | Default | Purpose |
+|---|---|---|
+| `LLM_MODE` | `ollama` | `ollama` for the host Ollama service or `stub` for deterministic local responses |
+| `LLM_MODEL` | `ollama/qwen3.5:4b` | Model configured for the gateway |
+| `OLLAMA_API_BASE` | `http://host.docker.internal:11434` in Compose | Ollama API base URL |
+| `LLM_TIMEOUT_SECONDS` | `180` | LLM request timeout |
+| `LLM_MAX_TOKENS` | `256` | Maximum generated tokens |
+| `OLLAMA_THINK` | `false` | Enable/disable Ollama thinking mode |
+| `OCR_MODE` | `tesseract` in Compose; `stub` in the OCR module | OCR mode; stub deliberately rejects image requests |
+| `TESSERACT_CMD` | detected executable | Optional explicit Tesseract executable path |
+| `JWT_SECRET` | local-demo value in Compose | JWT signing secret; replace before any non-demo deployment |
+| `AUDIT_DB` | `data/audit.sqlite3` natively; `/data/audit.sqlite3` in Compose | SQLite audit database path |
+| `POLICY_FILE` | `gateway/policy/policies.yaml` | Policy YAML path |
+| `CORS_ORIGINS` | `http://localhost:3000,http://localhost:5173` | Comma-separated allowed dashboard origins |
+| `VITE_API_URL` | `http://localhost:8000` | Dashboard API URL, applied at frontend build time |
 
 ## Demo accounts
 
 | Username | Password | Role | Department |
 |---|---|---|---|
 | `intern` | `intern-demo` | intern | engineering |
-| `hr` | `hr-demo` | hr_officer | hr |
-| `finance` | `finance-demo` | finance_manager | finance |
-| `admin` | `admin-demo` | admin | security |
+| `hr` | `hr-demo` | hr | hr |
+| `finance` | `finance-demo` | finance | finance |
+| `admin` | `admin-demo` | administrator | security |
 
-These seeded credentials are for local demonstrations only. Set `JWT_SECRET` and replace demo users before exposing the service to a network.
+These fixed accounts are for local demonstration only. Authentication currently uses the seeded in-code identities; replace them with managed identities and secure credential provisioning before deployment beyond a trusted local demo. Set a unique, strong `JWT_SECRET` and protect the API and audit storage.
 
-## Enable Ollama
+## Using Secure Chat and image input
 
-Ollama with `qwen3.5:4b` is configured by default. Verify it is available with `ollama list`; the gateway connects to `http://localhost:11434` when run directly and `http://host.docker.internal:11434` from Compose. Set `LLM_MODEL`, `OLLAMA_API_BASE`, or `LLM_MAX_TOKENS` to override defaults. Ollama's native chat API is used by default; optionally install `requirements-llm.txt` to use LiteLLM. Stub mode (`LLM_MODE=stub`) is deterministic and keeps the gateway testable without Ollama.
+1. Sign in to the dashboard and open **Secure chat**.
+2. Enter a prompt, or attach an image without a prompt (the dashboard supplies a short inspection prompt).
+3. Choose **Add image** and select up to three PNG or JPEG files, each no larger than 5 MB.
+4. Review the previews and remove any attachment you do not want to send.
+5. Select **Send securely**. The gateway decodes and normalizes each image, extracts text with Tesseract, and applies the same inbound PII/injection checks to the OCR text and typed prompt.
+
+Unsupported image types, invalid image data, excessive dimensions, OCR failures, and OCR timeouts fail closed. OCR text and image bytes are not intentionally included in audit snippets; audit events retain a redacted prompt snippet and content digest. The gateway does not send image bytes to the model.
 
 ## API
 
-- `POST /api/auth/login` — exchange demo credentials for a JWT.
-- `POST /v1/chat` — inspect prompt, optional attachments and access-controlled RAG, then return response and gateway report.
-- `GET /api/policies` / `PUT /api/policies` — read or replace the YAML policy configuration (admin only for writes).
-- `GET /api/incidents`, `/api/metrics/summary`, `/api/metrics/trends` — privacy-safe audit and metrics.
-- `GET /api/approvals`, `POST /api/approvals/{id}/decision` — approval queue.
-- `GET /api/users` and `GET /api/documents` — demo identity and accessible document metadata.
-
-Pass the JWT as `Authorization: Bearer <token>`. The login response includes a token for the dashboard.
-
-Example:
-
-```json
-{
-  "prompt": "Summarise this: Rahul, Aadhaar 2345 6789 0123, PAN ABCDE1234F",
-  "use_rag": false,
-  "attachments": []
-}
-```
-
-The Aadhaar/PAN are replaced with placeholders before the LLM adapter receives the prompt. Audit events retain a SHA-256 digest and redacted snippet, not the original prompt or OCR text.
-
-## Security behavior
-
-- PII and credentials are inspected before model invocation; prompt-injection rules can block extraction attempts.
-- Policies in `gateway/policy/policies.yaml` hot-reload when edited. Actions include `allow`, `warn`, `mask`, `redact`, `block`, and `require_approval`.
-- RAG filters documents by role, department, and clearance before retrieval. Unauthorized matching documents are counted without exposing their contents.
-- Image attachments accept PNG/JPEG only, at most three and 5 MB decoded each. Pillow re-encodes each image to PNG to strip metadata. Tesseract OCR text is then inspected exactly like typed text; image bytes are never sent to the model. Any decode, OCR, or OCR timeout error denies the request. In `OCR_MODE=stub`, image requests deliberately fail closed.
-- Audit rows form a SHA-256 hash chain. `GET /api/incidents/verify` reports whether the chain verifies.
-- The rule-based injection detector is the always-available baseline. The optional transformer classifier is intentionally not downloaded automatically.
-
-## Development and evaluation
+All endpoints other than login and health require a bearer token. Obtain one with:
 
 ```powershell
-python -m pytest
+$login = Invoke-RestMethod -Method Post -Uri http://localhost:8000/api/auth/login `
+  -ContentType "application/json" `
+  -Body '{"username":"intern","password":"intern-demo"}'
+$token = $login.access_token
+$headers = @{ Authorization = "Bearer $token" }
+```
+
+Send a chat request:
+
+```powershell
+$body = @{
+  prompt = "Summarise this note and protect its personal data."
+  use_rag = $false
+  attachments = @()
+} | ConvertTo-Json
+Invoke-RestMethod -Method Post -Uri http://localhost:8000/v1/chat `
+  -Headers $headers -ContentType "application/json" -Body $body
+```
+
+`attachments` accepts objects with `kind: "image"`, `mime: "image/png"` or `"image/jpeg"`, and `data_b64` containing the Base64-encoded image bytes. The request contract allows up to three image attachments.
+
+| Method and path | Purpose |
+|---|---|
+| `GET /health` | Gateway and configured LLM readiness |
+| `POST /api/auth/login` | Exchange a demo username/password for a JWT |
+| `POST /v1/chat` | Inspect a prompt, optional image attachments, and optional RAG request |
+| `GET /api/users` | List demo identities (authenticated) |
+| `GET /api/documents` | List documents accessible to the current user |
+| `GET /api/policies` | Read active policy configuration |
+| `PUT /api/policies` | Replace policy configuration (administrator only) |
+| `GET /api/incidents?limit=100` | Read privacy-safe audit events |
+| `GET /api/incidents/verify` | Verify the audit hash chain |
+| `GET /api/metrics/summary` | Summary of recent actions and findings |
+| `GET /api/metrics/trends` | Incident counts over time |
+| `GET /api/approvals` | Read approval queue (administrator only) |
+| `POST /api/approvals/{id}/decision` | Approve/reject a pending request (administrator only) |
+
+The interactive API reference is available at `/docs`.
+
+## Security and privacy notes
+
+- The gateway screens inbound content before calling the LLM and screens model output before returning it.
+- Typed prompt PII and secrets are masked according to `gateway/policy/policies.yaml`. Blocked and approval-required prompts do not proceed to model completion.
+- RAG retrieval filters documents by role, department, and clearance. Denied document identifiers may be reported without disclosing restricted document contents.
+- Image text is extracted locally by Tesseract in the gateway container and inspected alongside typed prompt text. Image data is never passed to the LLM.
+- Audit events store a SHA-256 content digest and a redacted snippet, not the raw prompt/OCR text, and form a verifiable hash chain.
+- Injection checks are rule-based. The optional transformer classifier is not downloaded automatically; the rule-based detector is the baseline in this project.
+- A synthetic evaluation set is useful for regression checks but cannot establish security against unknown or adaptive attacks.
+- Demo credentials, the default JWT signing secret, local HTTP endpoints, and local storage make this an educational/local prototype. Do not expose it to a network without a security review and deployment hardening.
+
+## Tests and evaluation
+
+Install project dependencies, then run the complete Python suite:
+
+```powershell
+python -m pytest -q
+```
+
+Run the 60-case gateway acceptance matrix and the additional 50-case edge suite as part of the full test run. The edge suite covers detector boundaries, injection normalization and benign lookalikes, image decoding/limits, and request validation.
+
+Run the labelled synthetic evaluation:
+
+```powershell
 python -m eval.run_eval
 ```
 
-The labelled JSONL evaluation set has benign, PII, direct/indirect injection, RAG, and benign-lookalike cases. The evaluation command reports precision, recall, F1, false-positive rate, and confusion counts. Results are measurements on this small synthetic set, not a guarantee against all attacks. OCR stub mode is used in CI; install Tesseract and set `OCR_MODE=tesseract` to measure actual OCR locally. Optional vector retrieval is available with `pip install -r requirements-rag.txt`, `RAG_BACKEND=chroma`, then `python -m rag.ingest`; the default keyword retriever needs no embedding model download.
+Evaluation metrics (precision, recall, F1, false-positive rate, and counts) are measurements over the checked-in synthetic dataset, not a guarantee for other inputs. OCR integration tests use real Tesseract when available and are skipped when it is not installed.
+
+Build/type-check the dashboard:
 
 ```powershell
-cd dashboard
-npm install
-npm run dev
+Set-Location dashboard
+npm.cmd install
+npm.cmd run build
 ```
 
-The gateway API is the source of truth. Dashboard API requests default to `http://localhost:8000` and can be configured with `VITE_API_URL`.
+The optional Chroma retrieval backend can be installed and populated with:
 
-## Project layout
+```powershell
+python -m pip install -r requirements-rag.txt
+$env:RAG_BACKEND = "chroma"
+python -m rag.ingest
+```
+
+The default keyword retriever requires no embedding-model download.
+
+## Repository layout
 
 ```text
-contracts/       Shared Pydantic v1.2 contracts
-gateway/         FastAPI endpoints, pipeline, policy engine, actions, LLM adapter
+contracts/       Pydantic request, response, user, and audit contracts
 detectors/       PII, credential, and confidential-content inspection
-injection/       Prompt and document injection scoring; fail-closed OCR wrapper
+eval/            Labelled evaluation data and metrics runner
+gateway/         FastAPI routes, chat pipeline, policies, audit, and LLM adapter
+injection/       Prompt/document injection rules and image OCR wrapper
 rag/             Synthetic documents and permission-filtered retrieval
-eval/            60 labelled prompts and metrics runner
-dashboard/       React/Vite chat, incidents, approvals, policy editor
-tests/           Unit and API integration tests
+dashboard/       React/Vite chat, image upload, incidents, approvals, and policies
+scripts/         Native Windows start/stop scripts
+tests/           Unit, API integration, acceptance, and edge-case tests
+docker-compose.yml
+Dockerfile
 ```
-
-This is a demonstration security gateway, not a certified DLP product. Review and adapt policies, secrets, account provisioning, and storage before production use.
