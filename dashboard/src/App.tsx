@@ -1,4 +1,6 @@
 import { ChangeEvent, FormEvent, useCallback, useEffect, useMemo, useState } from "react";
+import ReactMarkdown from "react-markdown";
+import remarkGfm from "remark-gfm";
 import {
   Bar, BarChart, CartesianGrid, Cell, Pie, PieChart, ResponsiveContainer, Tooltip, XAxis, YAxis,
 } from "recharts";
@@ -15,12 +17,20 @@ type Approval = {
   id: string; request_id: string; status: string; findings: { type: string }[];
   snippet_redacted: string; created_at: string;
 };
+type TraceAction = "allow" | "mask" | "redact" | "warn" | "block";
+type TraceDetection = {
+  type: string; start: number | null; end: number | null; confidence: number; policy?: string | null; action?: TraceAction | null;
+};
+type Trace = {
+  decision: TraceAction; detections: TraceDetection[]; sanitized_prompt: string | null; outbound_changes?: Record<string, unknown>;
+};
 type ChatResult = {
-  response: string; action_taken: string; findings_summary: { type: string; count: number }[];
+  response: string; action_taken: TraceAction | "require_approval"; findings_summary: { type: string; count: number }[];
   gateway_report: {
     policy_ids: string[]; denied_document_count: number; masked_before_model: boolean;
     sanitized_prompt?: string; image_text_scanned?: boolean;
   };
+  trace?: Trace;
 };
 type SelectedImage = { name: string; mime: "image/png" | "image/jpeg"; dataB64: string; preview: string };
 
@@ -236,22 +246,61 @@ export default function App() {
   );
 
   if (!token || !user) {
+    const demoAccounts = [
+      { label: "Intern", username: "intern", password: "intern-demo" },
+      { label: "HR", username: "hr", password: "hr-demo" },
+      { label: "Finance", username: "finance", password: "finance-demo" },
+      { label: "Admin", username: "admin", password: "admin-demo" },
+    ];
+
     return (
       <main className="login-wrap">
-        <div className="login-card">
-          <div className="brand-mark">H</div>
-          <p className="eyebrow">LOCAL AI SECURITY GATEWAY</p>
-          <h1>Keep sensitive data<br /><span>on your side.</span></h1>
-          <p className="muted">A security checkpoint for every prompt, document and answer.</p>
-          <form onSubmit={login} className="login-form">
-            <label>Username<input value={username} onChange={(e) => setUsername(e.target.value)} /></label>
-            <label>Password<input type="password" value={password} onChange={(e) => setPassword(e.target.value)} /></label>
-            {error && <p className="error">{error}</p>}
-            <button className="button primary full" disabled={loading}>{loading ? "Signing in…" : "Enter workspace"} <span>↗</span></button>
-          </form>
-          <div className="demo-users"><b>Demo access</b><span>intern / intern-demo</span><span>hr / hr-demo</span><span>admin / admin-demo</span></div>
-        </div>
-        <div className="login-art"><div className="orbit orbit-one" /><div className="orbit orbit-two" /><div className="shield">✳</div><p>INSPECT · DECIDE · PROTECT</p></div>
+        <section className="login-side">
+          <div className="login-brand">
+            <span className="login-brand-mark">H</span>
+            <span>Hinderman<small>AI SECURITY GATEWAY</small></span>
+          </div>
+          <div className="login-content">
+            <p className="eyebrow">SECURE WORKSPACE · SIGN IN</p>
+            <h1>Keep work moving.<br /><span>Keep data protected.</span></h1>
+            <p className="login-description">Sign in to access your organization’s AI security gateway.</p>
+            <form onSubmit={login} className="login-form">
+              <label>Username<input autoComplete="username" value={username} onChange={(e) => setUsername(e.target.value)} /></label>
+              <label>Password<input autoComplete="current-password" type="password" value={password} onChange={(e) => setPassword(e.target.value)} /></label>
+              {error && <p className="error">{error}</p>}
+              <button className="button primary full" disabled={loading}>{loading ? "Signing in…" : "Sign in to workspace"} <span>↗</span></button>
+            </form>
+            <div className="demo-users">
+              <div className="demo-users-heading"><b>Try a demo role</b><span>LOCAL DEMO</span></div>
+              <div className="demo-role-list">{demoAccounts.map((account) => (
+                <button
+                  type="button"
+                  key={account.username}
+                  className={username === account.username ? "demo-role selected" : "demo-role"}
+                  onClick={() => { setUsername(account.username); setPassword(account.password); setError(""); }}
+                >
+                  {account.label}<span>↗</span>
+                </button>
+              ))}</div>
+            </div>
+          </div>
+          <p className="login-footer">© HINDERMAN · PRIVATE BY DESIGN</p>
+        </section>
+        <aside className="login-art">
+          <div className="login-art-grid" />
+          <div className="login-art-top"><span className="login-online-dot" /> GATEWAY STATUS <b>OPERATIONAL</b></div>
+          <div className="login-art-main">
+            <div className="login-orbit login-orbit-one" />
+            <div className="login-orbit login-orbit-two" />
+            <div className="login-shield"><span>✳</span></div>
+            <span className="login-art-caption">INSPECT · DECIDE · PROTECT</span>
+          </div>
+          <div className="login-art-bottom">
+            <p className="eyebrow">YOUR AI SECURITY LAYER</p>
+            <h2>Every prompt.<br />A safer path forward.</h2>
+            <div className="login-protections"><span>01 <b>Inspect</b></span><span>02 <b>Decide</b></span><span>03 <b>Protect</b></span></div>
+          </div>
+        </aside>
       </main>
     );
   }
@@ -298,7 +347,8 @@ export default function App() {
             <div className="panel chat-panel"><div className="page-title"><div><p className="eyebrow">LIVE REQUEST PATH</p><h1>Secure AI chat.</h1><p className="muted">Every prompt is inspected, sanitised, authorised and audited before it reaches the model.</p></div><span className="pill safe">● Protected session</span></div>
               <div className="chat-model-bar"><span>PROTECTED SESSION</span><b>OLLAMA · {import.meta.env.VITE_LLM_LABEL ?? "qwen3.5:4b"}</b></div>
               <div className="sample-row">{samples.map((sample) => <button key={sample.label} className="sample" onClick={() => { setUseRag(Boolean(sample.use_rag)); void sendChat(undefined, sample); }}>{sample.label} ↗</button>)}</div>
-              {chat && <div className={`chat-result ${chat.action_taken}`}><div className="result-title"><span>{chat.action_taken === "block" ? "⛨" : "✳"} Gateway response</span><span className={`pill ${chat.action_taken}`}>{chat.action_taken}</span></div><p>{chat.response}</p>
+              {chat && <div className={`chat-result ${chat.action_taken}`}><div className="result-title"><span>{chat.action_taken === "block" ? "⛨" : "✳"} Gateway response</span><span className={`pill ${chat.action_taken}`}>{chat.action_taken}</span></div>
+                <div className="trace-markdown"><ReactMarkdown remarkPlugins={[remarkGfm]}>{chat.response}</ReactMarkdown></div>
                 {chat.gateway_report.masked_before_model && chat.gateway_report.sanitized_prompt && <div className="prompt-diff"><div><small>YOUR PROMPT</small><p>{prompt}</p></div><div><small>MODEL RECEIVED</small><p>{chat.gateway_report.sanitized_prompt}</p></div></div>}
                 <div className="result-meta">Findings: {chat.findings_summary.map((item) => `${item.type} ×${item.count}`).join(", ") || "none"} · {chat.gateway_report.image_text_scanned ? "Image OCR scanned" : chat.gateway_report.masked_before_model ? "Sensitive data masked before model" : "No prompt changes"}</div></div>}
               <form className="composer" onSubmit={(e) => void sendChat(e)}><textarea value={prompt} onChange={(e) => setPrompt(e.target.value)} placeholder="Type a prompt. Sensitive content is inspected before it reaches the model…" rows={4} />
@@ -318,12 +368,7 @@ export default function App() {
                   </div>
                   <button className="button primary" disabled={loading}>{loading ? "Inspecting…" : "Send securely"} <span>↑</span></button></div></form>
             </div>
-            <div className="panel side-note"><p className="eyebrow">INBOUND PROTECTION</p><h3>Every prompt passes through a checkpoint.</h3>
-              <ProtectionRow title="Sensitive data" text="PII and secrets are detected and masked." />
-              <ProtectionRow title="Prompt injection" text="Extraction and override attempts are blocked." />
-              <ProtectionRow title="Document access" text="Retrieval is filtered by your role and clearance." />
-              <ProtectionRow title="Privacy-safe audit" text="Events are recorded without raw prompt content." />
-            </div>
+            <GatewayTracePanel chat={chat} prompt={prompt} />
           </section>}
           {page === "Incidents" && <><PageHeading eyebrow="PRIVACY-SAFE AUDIT" title="Incident ledger." description="Tamper-evident activity without storing the sensitive content that triggered it." /><Incidents events={incidents} /></>}
           {page === "Approvals" && <Approvals approvals={approvals} decide={decide} />}
@@ -414,6 +459,104 @@ function Approvals({ approvals, decide }: { approvals: Approval[]; decide: (id: 
     {approvals.length ? <div className="approval-list">{approvals.map((approval) => <article className="approval-card" key={approval.id}><div><span className={`pill ${approval.status}`}>{approval.status}</span><h3>Request {approval.request_id.slice(0, 8)}</h3><p>{approval.snippet_redacted}</p><small>{approval.findings.map((f) => f.type).join(", ")} · {new Date(approval.created_at).toLocaleString()}</small></div>
       {approval.status === "pending" && <div className="approval-buttons"><button className="button secondary" onClick={() => decide(approval.id, "rejected")}>Reject</button><button className="button primary" onClick={() => decide(approval.id, "approved")}>Approve</button></div>}</article>)}</div>
       : <div className="empty-state"><span>✓</span><b>No requests awaiting review</b><p>Requests requiring approval will show up here.</p></div>}</div></>;
+}
+
+function GatewayTracePanel({ chat, prompt }: { chat: ChatResult | null; prompt: string }) {
+  const decision = chat?.trace?.decision
+    ?? (chat?.action_taken === "require_approval" ? "warn" : chat?.action_taken ?? null);
+  const detections = chat?.trace?.detections
+    ?? chat?.findings_summary.map((finding) => ({
+      type: finding.type,
+      start: null,
+      end: null,
+      confidence: 0,
+      policy: null,
+      action: decision,
+    }))
+    ?? [];
+  const trimmedPrompt = prompt.trim() || "No prompt entered yet.";
+
+  const badgeColor = decision ? {
+    allow: "trace-badge allow",
+    mask: "trace-badge mask",
+    redact: "trace-badge redact",
+    warn: "trace-badge warn",
+    block: "trace-badge block",
+  }[decision] ?? "trace-badge allow" : "trace-badge neutral";
+
+  const actionLabel = chat?.action_taken === "require_approval"
+    ? "REVIEW"
+    : decision?.toUpperCase() ?? "WAITING";
+  const summary = chat ? (() => {
+    if (chat.action_taken === "block") return "Blocked by gateway policy";
+    if (chat.action_taken === "require_approval") return "Awaiting human approval";
+    if (decision === "mask") return `Allowed · ${detections.length || 1} value masked`;
+    if (decision === "redact") return "Allowed · sensitive content redacted";
+    if (decision === "warn") return "Allowed · review required";
+    return "Allowed · no risky content detected";
+  })() : "Awaiting the next request";
+
+  if (!chat) {
+    return <aside className="panel side-note"><p className="eyebrow">GATEWAY TRACE</p><h3>Nothing has been inspected yet.</h3><div className="trace-empty-state"><span>∅</span><p>Send a prompt to see the decision, detections, and model sanitization.</p></div></aside>;
+  }
+
+  const highlightedPrompt = renderPromptWithHighlights(trimmedPrompt, detections);
+  const sanitized = chat.trace?.sanitized_prompt
+    ?? chat.gateway_report.sanitized_prompt
+    ?? (chat.action_taken === "block" || chat.action_taken === "require_approval"
+      ? "Request stopped before reaching the model."
+      : "Sanitized prompt details are unavailable.");
+  const outboundChanges = chat.trace?.outbound_changes as Record<string, unknown> | undefined;
+  const outboundChanged = Boolean(outboundChanges?.changed);
+  const outboundSummary = !chat.trace && (chat.action_taken === "block" || chat.action_taken === "require_approval")
+    ? "Not run · request stopped before model response"
+    : outboundChanged
+      ? `Action: ${String(outboundChanges?.action ?? "allow")}`
+      : "No outbound rewrite triggered.";
+
+  return <aside className="panel side-note"><div className="trace-header"><p className="eyebrow">GATEWAY TRACE</p><span className={badgeColor}>{actionLabel}</span></div><h3>{summary}</h3>
+    <div className="trace-block"><div className="trace-label">Decision</div><div className="trace-value"><strong>{decision ? decision.toUpperCase() : "PENDING"}</strong><small>{summary}</small></div></div>
+    <div className="trace-section">
+      <div className="trace-section-head"><span>What you typed</span></div>
+      <div className="trace-text block">{highlightedPrompt}</div>
+    </div>
+    <div className="trace-section">
+      <div className="trace-section-head"><span>What the gateway found</span><small>{detections.length} matches</small></div>
+      {detections.length ? <div className="trace-list">{detections.map((detection, index) => (
+        <div className="trace-row" key={`${detection.type}-${index}`}>
+          <div className="trace-row-main"><b>{detection.type}</b><small>{detection.policy ?? "policy fallback"}</small></div>
+          <div className="trace-row-meta"><span>{detection.confidence ? `${(detection.confidence * 100).toFixed(0)}%` : "n/a"}</span><span className={`trace-mini ${detection.action ?? decision ?? "allow"}`}>{detection.action ?? decision ?? "allow"}</span></div>
+        </div>
+      ))}</div> : <div className="trace-empty-inline">No risky content detected.</div>}
+    </div>
+    <div className="trace-diff">
+      <div className="trace-col"><div className="trace-section-head"><span>What the LLM received</span></div><div className="trace-text">{sanitized}</div></div>
+      <div className="trace-col"><div className="trace-section-head"><span>What came back</span></div><div className="trace-markdown compact"><ReactMarkdown remarkPlugins={[remarkGfm]}>{chat.response}</ReactMarkdown></div></div>
+    </div>
+    <div className="trace-outbound"><div className="trace-section-head"><span>Outbound check</span></div><div className="trace-value meta"><strong>{outboundChanged ? "Changed" : outboundSummary.startsWith("Not run") ? "Not run" : "Unchanged"}</strong><small>{outboundSummary}</small></div></div>
+  </aside>;
+}
+
+function renderPromptWithHighlights(prompt: string, detections: TraceDetection[]) {
+  const matches = detections.filter((d) => d.start !== null && d.end !== null && d.start >= 0 && d.end > d.start).sort((a, b) => (a.start ?? 0) - (b.start ?? 0));
+  if (!matches.length) return <>{prompt}</>;
+  const nodes: Array<string | JSX.Element> = [];
+  let cursor = 0;
+  matches.forEach((detection, index) => {
+    const start = detection.start ?? cursor;
+    const end = detection.end ?? cursor;
+    if (start > cursor) {
+      nodes.push(prompt.slice(cursor, start));
+    }
+    if (start < prompt.length && end > start) {
+      nodes.push(<mark key={`${detection.type}-${index}`} className={`trace-highlight ${detection.action ?? "mask"}`}>{prompt.slice(start, end)}</mark>);
+    }
+    cursor = Math.max(cursor, end);
+  });
+  if (cursor < prompt.length) {
+    nodes.push(prompt.slice(cursor));
+  }
+  return <>{nodes}</>;
 }
 
 function ProtectionRow({ title, text }: { title: string; text: string }) {

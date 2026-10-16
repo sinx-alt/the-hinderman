@@ -8,7 +8,7 @@ import time
 import uuid
 from collections import Counter
 
-from contracts import AuditFinding, ChatRequest, ChatResponse, Finding, UserContext
+from contracts import AuditFinding, ChatRequest, ChatResponse, DetectionTrace, Finding, GatewayTrace, UserContext
 from detectors import inspect
 from gateway.actions import summarize_findings, transform_text
 from gateway.approvals import enqueue_approval
@@ -26,6 +26,35 @@ class RequestDenied(Exception):
     def __init__(self, message: str, status_code: int = 400):
         super().__init__(message)
         self.status_code = status_code
+
+
+def _trace_decision(action: str) -> str:
+    return action if action in {"allow", "mask", "redact", "warn", "block"} else "warn"
+
+
+def _build_trace(
+    *,
+    decision: str,
+    findings: list[Finding],
+    sanitized_prompt: str | None,
+    outbound_changes: dict[str, object],
+) -> GatewayTrace:
+    return GatewayTrace(
+        decision=decision,
+        detections=[
+            DetectionTrace(
+                type=item.type,
+                start=item.start,
+                end=item.end,
+                confidence=float(item.confidence),
+                policy=None,
+                action=decision,
+            )
+            for item in findings
+        ],
+        sanitized_prompt=sanitized_prompt,
+        outbound_changes=outbound_changes,
+    )
 
 
 def _image_text(request: ChatRequest) -> tuple[str, list[Finding]]:
@@ -109,6 +138,23 @@ async def process_chat(
             policy_id=decision.policy_ids[0] if decision.policy_ids else None, action="block",
             snippet_redacted=audit_snippet[:500], raw_content=original, latency_ms=elapsed, source=source,
         )
+        trace = _build_trace(
+            decision=_trace_decision(decision.action),
+            findings=inbound_findings,
+            sanitized_prompt=None,
+            outbound_changes={"changed": False, "action": "block", "details": []},
+        )
+        trace.detections = [
+            DetectionTrace(
+                type=item.type,
+                start=item.start,
+                end=item.end,
+                confidence=float(item.confidence),
+                policy=decision.policy_ids[0] if decision.policy_ids else None,
+                action=_trace_decision(decision.action),
+            )
+            for item in inbound_findings
+        ]
         return ChatResponse(
             response=(
                 "Image attachment blocked by the security gateway after OCR inspection."
@@ -121,6 +167,7 @@ async def process_chat(
                             "denied_document_count": retrieval["denied_count"],
                             "denied_doc_ids": retrieval["denied_doc_ids"],
                             "image_text_scanned": bool(image_text)},
+            trace=trace,
         )
     if decision.action == "require_approval":
         approval_id = enqueue_approval(request_id, inbound_findings, audit_snippet[:500])
@@ -132,11 +179,29 @@ async def process_chat(
             policy_id=decision.policy_ids[0] if decision.policy_ids else None, action="require_approval",
             snippet_redacted=audit_snippet[:500], raw_content=original, latency_ms=elapsed, source=source,
         )
+        trace = _build_trace(
+            decision=_trace_decision(decision.action),
+            findings=inbound_findings,
+            sanitized_prompt=None,
+            outbound_changes={"changed": False, "action": "warn", "details": []},
+        )
+        trace.detections = [
+            DetectionTrace(
+                type=item.type,
+                start=item.start,
+                end=item.end,
+                confidence=float(item.confidence),
+                policy=decision.policy_ids[0] if decision.policy_ids else None,
+                action=_trace_decision(decision.action),
+            )
+            for item in inbound_findings
+        ]
         return ChatResponse(
             response="Request is waiting for human approval.", action_taken="require_approval",
             findings_summary=summarize_findings(inbound_findings), request_id=request_id,
             gateway_report={"policy_ids": decision.policy_ids, "approval_id": approval_id,
                             "audit_id": event.id, "image_text_scanned": bool(image_text)},
+            trace=trace,
         )
     safe_prompt = transform_text(original, inbound_findings, "mask")
     if decision.action == "redact":
@@ -174,6 +239,34 @@ async def process_chat(
         action=final_action, snippet_redacted=audit_snippet[:500],
         raw_content=original, latency_ms=elapsed, source=source,
     )
+    outbound_changes = {
+        "changed": bool(response_findings) or (final_action in {"redact", "block"}),
+        "action": _trace_decision(final_action),
+        "details": [
+            {
+                "type": item.type,
+                "confidence": round(float(item.confidence), 2),
+                "action": _trace_decision(outbound.action),
+            }
+            for item in response_findings
+        ],
+    }
+    trace = GatewayTrace(
+        decision=_trace_decision(final_action),
+        detections=[
+            DetectionTrace(
+                type=item.type,
+                start=item.start,
+                end=item.end,
+                confidence=float(item.confidence),
+                policy=(decision.policy_ids[0] if decision.policy_ids else None),
+                action=_trace_decision(final_action),
+            )
+            for item in inbound_findings
+        ],
+        sanitized_prompt=safe_prompt,
+        outbound_changes=outbound_changes,
+    )
     return ChatResponse(
         response=response, action_taken=final_action,
         findings_summary=summarize_findings(all_findings), request_id=request_id,
@@ -186,4 +279,5 @@ async def process_chat(
             "image_text_scanned": bool(image_text),
             "sanitized_prompt": safe_prompt,
         },
+        trace=trace,
     )

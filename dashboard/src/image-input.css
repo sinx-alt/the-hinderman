@@ -7,20 +7,22 @@
 }
 
 .attach-button {
+  position: relative;
   display: inline-flex;
   align-items: center;
   gap: 7px;
-  border: 1px solid #34443a;
-  border-radius: 7px;
-  padding: 7px 9px;
-  color: #c1d0c5;
+  border: 1px solid rgba(122, 231, 193, 0.2);
+  border-radius: 10px;
+  padding: 8px 10px;
+  background: rgba(122, 231, 193, 0.04);
+  color: var(--text-soft);
   font-size: 11px;
   cursor: pointer;
 }
 
 .attach-button:hover {
-  border-color: #629171;
-  color: #dff7e7;
+  border-color: rgba(122, 231, 193, 0.35);
+  color: var(--text);
 }
 
 .attach-button.disabled {
@@ -39,13 +41,13 @@
 }
 
 .attach-button:focus-within {
-  outline: 2px solid #8be5b0;
+  outline: 2px solid rgba(122, 231, 193, 0.6);
   outline-offset: 2px;
 }
 
 .attachment-hint {
-  color: #77847b;
-  font-size: 10px;
+  color: var(--muted);
+  font-size: 9px;
 }
 
 .image-attachments {
@@ -61,9 +63,9 @@
   min-width: 0;
   align-items: center;
   gap: 8px;
-  border: 1px solid #34443a;
-  border-radius: 8px;
-  background: #19221d;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  background: rgba(148, 163, 184, 0.02);
   padding: 5px;
 }
 
@@ -71,13 +73,13 @@
   width: 38px;
   height: 38px;
   flex: 0 0 auto;
-  border-radius: 5px;
+  border-radius: 8px;
   object-fit: cover;
 }
 
 .image-attachment span {
   overflow: hidden;
-  color: #c1cdc4;
+  color: var(--text-soft);
   font-size: 10px;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -86,16 +88,16 @@
 .image-attachment button {
   flex: 0 0 auto;
   border: 0;
-  border-radius: 5px;
+  border-radius: 7px;
   background: transparent;
-  color: #9ba79f;
+  color: var(--muted);
   font-size: 18px;
   line-height: 1;
 }
 
 .image-attachment button:hover {
-  background: #3a2423;
-  color: #ff9c94;
+  background: rgba(255, 125, 125, 0.09);
+  color: #ffb5b5;
 }
 
 @media (max-width: 650px) {

@@ -63,9 +63,30 @@ class AuditEvent(BaseModel):
     source: Literal["prompt", "document", "image"] | None = None
 
 
+class DetectionTrace(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    type: str
+    start: int | None = None
+    end: int | None = None
+    confidence: float = Field(ge=0, le=1)
+    policy: str | None = None
+    action: Action | None = None
+
+
+class GatewayTrace(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    decision: Literal["allow", "mask", "redact", "warn", "block"]
+    detections: list[DetectionTrace] = Field(default_factory=list)
+    sanitized_prompt: str | None = None
+    outbound_changes: dict[str, object] = Field(default_factory=dict)
+
+
 class ChatResponse(BaseModel):
     response: str
     action_taken: Action
     findings_summary: list[dict[str, object]]
     request_id: str
     gateway_report: dict[str, object]
+    trace: GatewayTrace | None = None
